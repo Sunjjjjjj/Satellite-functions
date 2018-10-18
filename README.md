@@ -1,2 +1,2 @@
 # Satellite-functions
-Includes functions used for satellite data.
+Includes functions used for processing and visualizing satellite data.
