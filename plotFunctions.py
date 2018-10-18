@@ -30,12 +30,17 @@ bwr.set_gamma(1)
 bwr.set_over(bwr(0.99))
 bwr.set_under(bwr(0))
 
+cm = {'rainbow': rainbow,
+      'rainbow_r': rainbow_r,
+      'bwr': bwr}
+
 
 def plotSpatial(datasets, ROI, cornercoords = False): 
     """
     Function to plot spatial map on 'cyl' projection. 
     Multiple subplots is applicable.
     Number of subplots = length of datasets = N. Subplot(1, N, x).
+    Colormaps are self-defined.
     
     -datasets: dictionary includes all datasets to be plot. 
     datasets = [{'data': data, 'parameter': 'para', 'label': 'label', 'bounds': (x1, x2), 'cmap': cmap}, 
@@ -93,7 +98,7 @@ def plotSpatial(datasets, ROI, cornercoords = False):
             visible = True
         else: 
             visible = False
-        cb = plt.scatter(data.lon ,data.lat, c = data[para], s = 6, visible = visible, cmap=cmap, \
+        cb = plt.scatter(data.lon ,data.lat, c = data[para], s = 6, visible = visible, cmap=cm[cmap], \
                          marker = 's', alpha = 1, vmin = bounds[0], vmax = bounds[1], edgecolors = 'none')  
         cbar = plt.colorbar(cb, extend = 'both', fraction=0.15, pad= 0.1, shrink = 0.8, aspect = 15, \
                             orientation = 'horizontal', ticks = np.linspace(bounds[0], bounds[1], 5))
