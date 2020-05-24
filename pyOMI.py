@@ -950,13 +950,11 @@ def readOMAERUV(dates, ROI, threshold, grid):
     
     dates = pd.date_range(startdate, enddate)
     
-    
     output = pd.DataFrame()
     for idate in dates:
         sys.stdout.write('\r Reading OMAERUV %02i-%02i-%04i' %(idate.year, idate.month, idate.day))
         path = '/nobackup_1/users/sunj/OMI/OMAERUV/%4i/%02i/%02i/' %(idate.year, idate.month, idate.day)
         orbit = glob.glob(path + '*.he5')[:]
-
 # =============================================================================
 # read data    
 # =============================================================================
@@ -984,8 +982,10 @@ def readOMAERUV(dates, ROI, threshold, grid):
                     CF = data['CloudFraction'][:]
                     As = data['SurfaceAlbedo'][:]
                     AI_qf = data['AlgorithmFlags_AerosolIndex'][:]
-    #                qf = data['PixelQualityFlags'][:]
+#                    qf = data['PixelQualityFlags'][:]
                     algorithm_qf = data['FinalAlgorithmFlags'][:]
+                    HF = data['HeightFlags'][:]
+                    Type = data['AerosolType'][:]
                     
                     lat = geo['Latitude'][:]
                     lon = geo['Longitude'][:]
@@ -997,6 +997,15 @@ def readOMAERUV(dates, ROI, threshold, grid):
                     row = geo['XTrackQualityFlags'][:]
                     gpqf = geo['GroundPixelQualityFlags'][:]
                     
+                    
+                    AOD[AOD < 0] = -1
+                    AAOD[AAOD < 0] = -1
+                    AI[AI < -1e2] = -1e2
+                    residue[residue < -1e2] = -1e2
+                    AOD500std = NNstd(AOD[:, :, -1])
+                    AAOD500std = NNstd(AAOD[:,:, -1])
+                    AIstd = NNstd(AI)
+                    residuestd = NNstd(residue)
                     
                     glint_angle = np.rad2deg(np.arccos(np.cos(np.deg2rad(sza)) * np.cos(np.deg2rad(vza)) + \
                                                        np.sin(np.deg2rad(sza)) * np.sin(np.deg2rad(vza)) * np.cos(np.deg2rad(raa))))
@@ -1013,12 +1022,136 @@ def readOMAERUV(dates, ROI, threshold, grid):
                     
                     setdata = {'lat': lat, 'lon': lon, 'latb1': latc[:, :, 0], 'lonb1': lonc[:, :, 0], 'latb2': latc[:, :, 1], 'lonb2': lonc[:, :, 1],\
                                'latb3': latc[:, :, 2], 'lonb3': lonc[:, :, 2], 'latb4': latc[:, :, 3], 'lonb4': lonc[:, :, 3], \
-                               'row': row, 'sun_glint': sun_glint, 'QF': algorithm_qf, \
-                               'sza': sza, 'vza': vza, 'raa': raa, 'AI388': AI, 'R354obs': normR[:,:,0] * np.pi / np.cos(np.deg2rad(sza)), 'R388obs': normR[:,:,1] * np.pi / np.cos(np.deg2rad(sza)), \
+                               'row': row, 'sun_glint': sun_glint, 'QF': algorithm_qf, 'HF': HF, 'type': Type, \
+                               'sza': sza, 'vza': vza, 'raa': raa, 'AI388': AI, 'AI388std': AIstd, 'R354obs': normR[:,:,0] * np.pi / np.cos(np.deg2rad(sza)), 'R388obs': normR[:,:,1] * np.pi / np.cos(np.deg2rad(sza)), \
                                'CF': CF, 'ALH': ALH, 'Ps': Ps, 'As': As[:,:,1], 'deltaTime': deltaTime, 'orbit': np.ones(lat.shape) * int(orbitnum), \
                                'AAOD354': AAOD[:,:,0], 'AOD354': AOD[:,:,0], 'SSA354': SSA[:,:,0], \
                                'AAOD388': AAOD[:,:,1], 'AOD388': AOD[:,:,1], 'SSA388': SSA[:,:,1], \
-                               'AAOD500': AAOD[:,:,-1], 'AOD500': AOD[:,:,-1], 'SSA500': SSA[:,:,-1], 'residue': residue}
+                               'AAOD500': AAOD[:,:,-1], 'AOD500': AOD[:,:,-1], 'SSA500': SSA[:,:,-1], \
+                               'AOD500std': AOD500std, 'AAOD500std': AAOD500std, \
+                               'residue': residue, 'residuestd': residuestd, 'AIQF': AI_qf}
+                    del AI, normR, AAOD, AOD, SSA, wvls, lat, lon
+                    
+                    
+                    for ikey in setdata.keys():
+                        setdata[ikey] = setdata[ikey].reshape(-1)
+                    setdata = pd.DataFrame.from_dict(setdata)
+    
+# =============================================================================
+# combine data
+# =============================================================================
+    #                setdata = pd.DataFrame.from_dict(setdata)
+                    output = output.append(setdata)
+                except: 
+                    pass
+
+# =============================================================================
+# criteria 
+# =============================================================================
+    try:
+        mask = (output['lat'] >= ROI['S']) & (output['lat'] <= ROI['N']) & (output['lon'] >= ROI['W']) & (output['lon'] <= ROI['E']) & \
+                    (output['row'] == 0) & (output['sza'] < 70)  & \
+                    (output['AI388'] > threshold) & (output['residue'] > threshold) & \
+                    (output['CF'] <= 0.3) & (~output['sun_glint']) & (output['QF'] < 8)
+    #                    & (output['ALH'] > 0) & \
+    #                    (output['R354obs'] > 0) & \
+    #                    (output['AOD388'] >= 0) & \
+    #                    (output['SSA388'] >= 0) 
+                    
+        output = output[mask].reset_index(drop = True)
+        
+        
+        def meaTime(dTime): 
+            mTime = pd.datetime(1993, 1, 1) + pd.Timedelta(seconds = dTime)
+            return mTime
+        output['dateTime'] = list(map(meaTime, output['deltaTime']))
+        output['timeStamp'] = output['dateTime'].values.astype(np.int64) // 10 ** 9
+        del output['deltaTime']
+    except:
+        pass
+    return output
+
+
+def readOMCLDO2(dates, ROI): 
+    """
+    Read OMCLDO2 raw data orbit by orbit. Pre-processing contains  
+    
+    Input:  date and region
+    Return: selected raw data orbit by orbit
+    """
+#==============================================================================
+# Reading data    
+#==============================================================================
+    try:
+        startdate, enddate = dates[0], dates[1]
+    except:
+        startdate = enddate = dates[0]
+    
+    dates = pd.date_range(startdate, enddate)
+    
+    
+    output = pd.DataFrame()
+    for idate in dates:
+        sys.stdout.write('\r Reading OMAERUV %02i-%02i-%04i' %(idate.year, idate.month, idate.day))
+        path = '/nobackup_1/users/sunj/OMI/OMCLDO2/%4i/%02i/%02i/' %(idate.year, idate.month, idate.day)
+        orbit = glob.glob(path + '*.he5')[:]
+
+# =============================================================================
+# read data    
+# =============================================================================
+        if len(orbit) == 0:
+            print('Warning: No data available on %02i-%02i-%04i' %(idate.year, idate.month, idate.day))
+        else: 
+            for iorbit in orbit: 
+                idx = iorbit.find('-o')
+                orbitnum = iorbit[idx+2 : idx + 7]
+                sys.stdout.write('\r Reading OMAERUV # %04i-%02i-%02i %s' % (idate.year, idate.month, idate.day, orbitnum))
+                try: 
+                    _data = h5py.File(iorbit,'r')
+               
+                    data = _data['/HDFEOS/SWATHS/CloudFractionAndPressure/Data Fields']
+                    geo  = _data['/HDFEOS/SWATHS/CloudFractionAndPressure/Geolocation Fields']
+                    
+                    CF = data['CloudFraction'][:]
+                    CP = data['CloudPressure'][:]
+                    SP = data['ScenePressure'][:]
+                    Ps = data['TerrainPressure'][:]
+                    As = data['TerrainReflectivity'][:]
+                    algorithm_qf = data['FinalAlgorithmFlags'][:]
+                    row = data['XTrackQualityFlags'][:]
+                    QA = data['MeasurementQualityFlags'][:]
+                    PQ = data['ProcessingQualityFlags'][:]
+                    SCDO2 = data['SlantColumnAmountO2O2'][:]
+                    SCDO3 = data['SlantColumnAmountO3'][:]
+                    SCDNO2 = data['SlantColumnAmountNO2'][:]
+                     
+                    lat = geo['Latitude'][:]
+                    lon = geo['Longitude'][:]
+                    latc = geo['FoV75CornerLatitude'][:]
+                    lonc = geo['FoV75CornerLongitude'][:]
+                    sza = geo['SolarZenithAngle'][:]
+                    vza = geo['ViewingZenithAngle'][:]
+                    raa = geo['RelativeAzimuthAngle'][:]
+                    gpqf = geo['GroundPixelQualityFlags'][:]
+                    
+                    glint_angle = np.rad2deg(np.arccos(np.cos(np.deg2rad(sza)) * np.cos(np.deg2rad(vza)) + \
+                                                       np.sin(np.deg2rad(sza)) * np.sin(np.deg2rad(vza)) * np.cos(np.deg2rad(raa))))
+                    waterflag = np.where(np.bitwise_and(gpqf,15) == 1, False, True)
+                    sun_glint = (waterflag) & (glint_angle <= 20)
+                    
+                    deltaTime = geo['Time'][:]
+                    refTime = datetime.datetime(1993, 1, 1, 0, 0, 0)
+                    deltaTime = np.ones(lat.shape) * deltaTime.reshape(len(deltaTime), 1) 
+                    
+                                    
+                    _data.close()
+                    
+                    setdata = {'lat': lat, 'lon': lon, 'latb1': latc[:, :, 0], 'lonb1': lonc[:, :, 0], 'latb2': latc[:, :, 1], 'lonb2': lonc[:, :, 1],\
+                               'latb3': latc[:, :, 2], 'lonb3': lonc[:, :, 2], 'latb4': latc[:, :, 3], 'lonb4': lonc[:, :, 3], \
+                               'row': row, 'sun_glint': sun_glint, 'QF': algorithm_qf, \
+                               'sza': sza, 'vza': vza, 'raa': raa, \
+                               'CF': CF, 'CP': CP, 'SP': SP, 'As': As, 'Ps': Ps, \
+                               'SCDO2': SCDO2, 'SCDO3': SCDO3, 'SCDNO2': SCDNO2}
                     del AI, normR, AAOD, AOD, SSA, wvls, lat, lon
                     
                     
@@ -1041,14 +1174,19 @@ def readOMAERUV(dates, ROI, threshold, grid):
         mask = (output['lat'] >= ROI['S']) & (output['lat'] <= ROI['N']) & (output['lon'] >= ROI['W']) & (output['lon'] <= ROI['E']) & \
                     (output['row'] == 0) & (output['sza'] < 70)  & \
                     (output['AI388'] > threshold) & \
-                    (output['CF'] <= 0.3) & (~output['sun_glint']) & (output['QF'] < 8)
+                    (output['CF'] <= 0.3) & (output['CF'] >= 0) & (~output['sun_glint']) & (output['QF'] < 8)
     #                    & (output['ALH'] > 0) & \
     #                    (output['R354obs'] > 0) & \
     #                    (output['AOD388'] >= 0) & \
     #                    (output['SSA388'] >= 0) 
                     
         output = output[mask].reset_index(drop = True)
+# =============================================================================
+# AAH        
+# =============================================================================
+        output['AAH'] = output['CP'].copy()
         
+        output.loc['AAH', (output['CF'] > 0.25) & ( output['CF'] < 0.75)] = max(output['CP'], output['SP'])
         
         def meaTime(dTime): 
             mTime = pd.datetime(1993, 1, 1) + pd.Timedelta(seconds = dTime)
@@ -1240,6 +1378,7 @@ def readOMIAerNN(dates, ROI, SSA):
                 temp['AOT'] = data['AOT'][:]
                 temp['AOD_MODIS'] = data['MODIS_AOT_550_nm_DTDBland&ocean'][:]
                 temp['CF'] = data['MODIS_Cloud_Fraction_Final'][:]
+                temp['OMMYDCLD'] = data['MODISCloudFractionOMMYDCLD'][:]
                 temp['As'] = data['TerrainReflectivity'][:]
                 temp['timeStamp'] = data['Time'][:]
                 temp['sza'] = data['SolarZenithAngle'][:]
