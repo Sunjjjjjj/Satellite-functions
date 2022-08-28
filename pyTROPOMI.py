@@ -26,11 +26,10 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
     data = netCDF4.Dataset(inputfile, 'r')
     # data = Nio.open_file(inputfile, 'r')
     temp = pd.DataFrame()
-    
-    if unit in ['mol', 'molecule']:
+    if unit in ['mol', 'molecule', 'DU']:
         pass
     else:
-        print('Unit label is incorrect! Choose from ''mol', 'molecule''.')
+        print('Unit label is incorrect! Choose from ''mol', 'molecule', 'DU''.')
         
     # read CO product
     if inputfile.find('S5P_OFFL_L2__CO_____') >= 0:
@@ -183,6 +182,7 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
         xdim, ydim = data['PRODUCT/latitude'][0].shape
         time = np.array(data['PRODUCT/time_utc'][:], str)[0]
         temp['time_utc'] = pd.to_datetime(np.tile(time.T, ydim).reshape(-1))
+        temp['cloud_fraction_intensity_weighted'] = data['PRODUCT/SUPPORT_DATA/DETAILED_RESULTS/cloud_fraction_intensity_weighted'][0].filled(np.nan).reshape(-1)
 
         for i in range(4):
             temp['latitude_bounds%i' %(i + 1)] = data['PRODUCT/SUPPORT_DATA/GEOLOCATIONS/latitude_bounds'][0, :, :, i].filled(np.nan).reshape(-1)
