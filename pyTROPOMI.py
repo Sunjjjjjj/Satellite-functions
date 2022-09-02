@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import scipy.interpolate
 from scipy.interpolate import griddata
+from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 import pickle
@@ -31,7 +32,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
     else:
         print('Unit label is incorrect! Choose from ''mol', 'molecule', 'DU''.')
         
-    # read CO product
+# =============================================================================
+#     # read CO product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__CO_____') >= 0:
         variables = ['carbonmonoxide_total_column', 'carbonmonoxide_total_column_corrected',
                       'carbonmonoxide_total_column_precision']
@@ -64,7 +67,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
                 except:
                     pass
             
-    # read O3 product
+# =============================================================================
+#     # read O3 product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__O3_____') >= 0:
         variables = ['ozone_total_vertical_column', 'ozone_total_vertical_column_precision'] 
         other = ['qa_value', 'latitude', 'longitude']
@@ -94,8 +99,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
             for ikey in variables:
                 temp[ikey] = temp[ikey] * factor_molecule
             
-    
-    # read NO2 product
+# =============================================================================
+#     # read NO2 product
+# =============================================================================
     if inputfile.find('L2__NO2____') >= 0:
         variables = ['nitrogendioxide_tropospheric_column', 'nitrogendioxide_tropospheric_column_precision']
         other = ['nitrogendioxide_tropospheric_column_precision_kernel', 
@@ -125,7 +131,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
                 temp[ikey] = temp[ikey] * factor_molecule
 
 
-    # read SO2 product
+# =============================================================================
+#     # read SO2 product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__SO2____') >= 0:
         variables = ['sulfurdioxide_total_vertical_column', 'sulfurdioxide_total_vertical_column_precision']
         other = ['qa_value','latitude', 'longitude']
@@ -152,7 +160,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
             for ikey in variables:
                 temp[ikey] = temp[ikey] * factor_molecule
 
-    # read CH4 product
+# =============================================================================
+#     # read CH4 product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__CH4____') >= 0:
         variables = ['methane_mixing_ratio', 'methane_mixing_ratio_bias_corrected', 'methane_mixing_ratio_precision']
         other = ['qa_value','latitude', 'longitude']
@@ -172,7 +182,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
         temp = temp[mask & qamask]
         temp.reset_index(drop = True, inplace = True)
 
-    # read HCHO product
+# =============================================================================
+#     # read HCHO product
+# =============================================================================
     if inputfile.find('L2__HCHO___') >= 0:
         variables = ['formaldehyde_tropospheric_vertical_column', 'formaldehyde_tropospheric_vertical_column_precision']
         other = ['qa_value','latitude', 'longitude']
@@ -199,7 +211,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
             for ikey in variables:
                 temp[ikey] = temp[ikey] * factor_molecule
 
-    # read UVAI product
+# =============================================================================
+#     # read UVAI product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__AER_AI_') >= 0:
         variables = ['aerosol_index_340_380', 'aerosol_index_340_380_precision',
                      'aerosol_index_354_388', 'aerosol_index_354_388_precision']
@@ -220,7 +234,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
         temp = temp[mask & qamask]
         temp.reset_index(drop = True, inplace = True)
 
-    # read ALH product
+# =============================================================================
+#     # read ALH product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__AER_LH_') >= 0:
         variables = ['aerosol_mid_height', 'aerosol_mid_height_precision',
                      'aerosol_mid_pressure', 'aerosol_mid_pressure_precision']
@@ -241,7 +257,9 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
         temp = temp[mask & qamask]
         temp.reset_index(drop = True, inplace = True)
 
-    # read O3 profile product
+# =============================================================================
+#     # read O3 profile product
+# =============================================================================
     if inputfile.find('S5P_OFFL_L2__O3__PR_') >= 0:
         variables = ['ozone_profile', 'ozone_profile_precision']
         other = ['ozone_total_column', 'ozone_total_column_precision',
@@ -249,35 +267,43 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
                  'qa_value', 'latitude', 'longitude']
         # read layer information
         levels =  data['PRODUCT/level'][:]
-        
-        # altitude grid
-        z = np.round(data['PRODUCT/altitude'][0].mean(axis = (0, 1)).data / 1e3) * 1e3
-        
         xdim, ydim = data['PRODUCT/latitude'][0].shape
+        m, ydim = data['PRODUCT/latitude'][0].shape
         
+        # read 3D variables
         temp = {}
         for ikey in variables:
-            pr = []
-            for i in range(xdim):
-                for j in range(ydim):
-                    x, y = data['PRODUCT/altitude'][0, i, j, :].data, data['PRODUCT/%s' % ikey][0, i, j, :].data
-                    # unit coversion factor
-                    factor_molecule = data['PRODUCT/%s' % ikey].multiplication_factor_to_convert_to_molecules_percm3
-                    # convert unit
-                    if unit == 'molecule':
-                        y = y * factor_molecule
-                    func = scipy.interpolate.interp1d(x, y, fill_value = 'extrapolate')
-                    y_interp = func(z)
-                    pr.append(y_interp)
-            temp[ikey] = pd.DataFrame(pr, columns = np.around(z/1e3))
-       
-
+            # grid profile
+            # pr = []
+            # for i in range(xdim):
+            #     for j in range(ydim):
+            #         x, y = data['PRODUCT/altitude'][0, i, j, :].data, data['PRODUCT/%s' % ikey][0, i, j, :].data
+            #         # unit coversion factor
+            #         factor_molecule = data['PRODUCT/%s' % ikey].multiplication_factor_to_convert_to_molecules_percm3
+            #         # convert unit
+            #         if unit == 'molecule':
+            #             y = y * factor_molecule
+            #         func = scipy.interpolate.interp1d(x, y, fill_value = 'extrapolate')
+            #         y_interp = func(z)
+            #         pr.append(y_interp)
+            y = data['PRODUCT/%s' % ikey][0].filled(np.nan).reshape(xdim * ydim, len(levels))
+            factor_molecule = data['PRODUCT/%s' % ikey].multiplication_factor_to_convert_to_molecules_percm3
+            if unit == 'molecule':
+                y = y * factor_molecule
+            temp[ikey] = pd.DataFrame(y, columns = np.array(levels) + 1)
+        # read altitude and pressure
+        temp['altitude'] = pd.DataFrame(data['PRODUCT/altitude'][0].filled(np.nan).reshape(xdim * ydim, len(levels)), 
+                                  columns = np.array(levels) + 1)
+        temp['pressure'] = pd.DataFrame(data['PRODUCT/pressure'][0].filled(np.nan).reshape(xdim * ydim, len(levels)), 
+                                  columns = np.array(levels) + 1)
+        # other 2D variables
         temp_ = pd.DataFrame()
         for ikey in other:
             temp_[ikey] = data['PRODUCT/%s' % ikey][0].filled(np.nan).reshape(-1)
-            # temp = pd.concat([temp, temp_], axis = 1)
         
-        xdim, ydim = data['PRODUCT/latitude'][0].shape
+        temp_['pressure_at_tropopause'] = data['PRODUCT/SUPPORT_DATA/INPUT_DATA/pressure_at_tropopause'][0].filled(np.nan).reshape(-1)        
+        
+        
         time = np.array(data['PRODUCT/time_utc'][:], str)[0]
         temp_['time_utc'] = pd.to_datetime(np.tile(time.T, ydim).reshape(-1))
 
@@ -306,8 +332,31 @@ def readTROPOMI(inputfile, ROI, unit = 'mol', qa = 0.5):
         if unit == 'molecule':
             for ikey in variables:
                 temp_[ikey] = temp_[ikey] * factor_molecule
-        temp['column'] = temp_
         
+        
+        # height at tropopause
+        height_at_tropopause = []
+        # tropospheric ozone column
+        tropospheric_column = []
+        
+        for i in range(len(temp['altitude'])):
+            x, y = temp['pressure'].iloc[i], temp['altitude'].iloc[i]
+            func = scipy.interpolate.interp1d(x, y, fill_value = 'extrapolate')
+            y_hat = func(temp_['pressure_at_tropopause'].iloc[0])
+            
+            # index of tropopause
+            idx = y[(y - y_hat) <= 0].argmax()
+            profile_t = temp['ozone_profile'].iloc[i][:idx]
+            dz = temp['altitude'].iloc[i][1:idx + 1].values - temp['altitude'].iloc[i][:idx].values
+            # tropospheric ozone column
+            tropospheric_column.append((profile_t * dz).sum())
+            height_at_tropopause.append(y_hat)
+            
+            
+        temp_['height_at_tropopause'] = height_at_tropopause
+        temp_['ozone_tropospheric_column'] = tropospheric_column
+        
+        temp['column'] = temp_
     data.close()
     return temp
 
@@ -369,7 +418,8 @@ def getOrbitNumber(inputfile):
     if len(orb) != 5:
         print('This is not an orbit number!')
     return int(orb)
-    
+
+
 
 
 # def surfOzone(data_column, data_profile):
@@ -380,7 +430,7 @@ def getOrbitNumber(inputfile):
 
 #%%
 
-# ROI = {'S': 15, 'N': 55, 'W': 65, 'E': 138}
+ROI = {'S': 15, 'N': 55, 'W': 65, 'E': 138}
 # inputfile = '/home/sunji/Data/TROPOMI/OFFL_L2__CO_____/S5P_OFFL_L2__CO_____20210101T031206_20210101T045336_16681_01_010400_20210102T170040.nc'
 # f = '/home/sunji/Data/TROPOMI/OFFL_L2__O3_____/S5P_OFFL_L2__O3_____20211029T041211_20211029T055341_20952_02_020201_20211030T201719.nc'
 # f = '/home/sunji/Data/如皋/S5P_OFFL_L2__NO2____20220115T044821_20220115T062952_22059_02_020301_20220116T205403.nc'
@@ -392,8 +442,8 @@ def getOrbitNumber(inputfile):
 # f = '/home/sunji/Data/TROPOMI/OFFL_L2__AER_AI_/S5P_OFFL_L2__AER_AI_20220115T044821_20220115T062952_22059_02_020301_20220116T183749.nc'
 # inputfile = '/home/sunji/Data/TROPOMI/OFFL_L2__NO2____/S5P_OFFL_L2__NO2____20220131T030802_20220131T044932_22285_02_020301_20220201T190344.nc'
 inputfile = '/home/sunji/Data/TROPOMI/OFFL_L2__O3__PR_/S5P_OFFL_L2__O3__PR_20220801T030515_20220801T044645_24867_03_020400_20220803T064306.SUB.nc4'
-print(getOrbitNumber(inputfile))
-# data = readTROPOMI(inputfile, ROI)
+# print(getOrbitNumber(inputfile))
+# data = readTROPOMI(inputfile, ROI, unit = 'mol')
 # output = subTROPOMI(inputfile, ROI)
 
 # lat = output['latitude']['data']
